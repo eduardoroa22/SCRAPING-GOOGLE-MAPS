@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grid Viewer con Máscara — BBox → Grid (filtrado por polígono)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <style>
+    *{box-sizing:border-box} body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif;background:#0b0e13;color:#e9edf1}
+    header{padding:12px 16px;border-bottom:1px solid #233041;background:#0f131a;position:sticky;top:0;z-index:10}
+    h1{font-size:18px;margin:0}
+    .wrap{display:grid;grid-template-columns:360px 1fr;gap:12px;height:calc(100vh - 56px)}
+    .panel{padding:12px;overflow:auto;border-right:1px solid #233041}
+    label{font-size:12px;opacity:.85}
+    input[type="number"], input[type="text"]{width:100%;padding:8px 10px;border-radius:10px;border:1px solid #233041;background:#0f131a;color:#e9edf1;margin:6px 0 12px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .btn{display:inline-block;padding:8px 12px;border-radius:10px;border:1px solid #2a405a;background:#152233;color:#e9edf1;cursor:pointer;margin:4px 6px 10px 0}
+    .btn:hover{background:#1a2c44}
+    #map{height:100%;width:100%}
+    table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px}
+    th,td{border-bottom:1px solid #233041;padding:6px 8px;text-align:left}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#1f3148;border:1px solid #294463}
+    .muted{opacity:.75}
+    .link{color:#8dc1ff;text-decoration:none}
+    .hint{font-size:12px;margin-top:6px;color:#9fb3c8}
+    details summary{cursor:pointer}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Grid Viewer con máscara (polígono) — dibuja/usa un polígono para filtrar puntos</h1>
+  </header>
+  <div class="wrap">
+    <aside class="panel">
+      <div>
+        <div class="row">
+          <div>
+            <label>lat_min (sur)</label>
+            <input id="lat_min" type="number" step="0.000001" value="32.500000">
+          </div>
+          <div>
+            <label>lat_max (norte)</label>
+            <input id="lat_max" type="number" step="0.000001" value="42.000000">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>lng_min (oeste)</label>
+            <input id="lng_min" type="number" step="0.000001" value="-124.500000">
+          </div>
+          <div>
+            <label>lng_max (este)</label>
+            <input id="lng_max" type="number" step="0.000001" value="-114.100000">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Espaciado de la malla (km)</label>
+            <input id="spacing_km" type="number" step="1" value="30">
+          </div>
+          <div>
+            <label>Radio de búsqueda (m)</label>
+            <input id="radius_m" type="number" step="100" value="30000">
+          </div>
+        </div>
+        <div>
+          <button class="btn" id="btnGen">Generar grid</button>
+          <button class="btn" id="btnExportPts">Exportar puntos (.geojson)</button>
+          <button class="btn" id="btnExportCsv">Exportar puntos (.csv)</button>
+          <span class="pill" id="stats">0 puntos</span>
+        </div>
+        <p class="muted">Cobertura continua sugerida: <code>RADIUS_M ≳ spacing_km * 1000 / √2</code>.</p>
+
+        <hr style="border-color:#233041;margin:12px 0;">
+        <h3 style="margin:6px 0 4px;font-size:14px">Máscara (opcional)</h3>
+        <div>
+          <button class="btn" id="btnStartMask">Dibujar máscara</button>
+          <button class="btn" id="btnCloseMask" disabled>Cerrar y aplicar</button>
+          <button class="btn" id="btnClearMask" disabled>Limpiar máscara</button>
+        </div>
+        <div class="hint">Haz clic en el mapa para añadir vértices. Cuando termines el contorno del estado (ej. California), pulsa “Cerrar y aplicar”.</div>
+        <div style="margin-top:8px">
+          <input type="file" id="fileGeo" accept=".json,.geojson" />
+          <button class="btn" id="btnExportMask" disabled>Exportar máscara (.geojson)</button>
+        </div>
+
+        <details style="margin-top:8px">
+          <summary>Ver lista de puntos (lat/lng)</summary>
+          <table id="tbl"><thead><tr><th>#</th><th>lat</th><th>lng</th></tr></thead><tbody></tbody></table>
+        </details>
+      </div>
+    </aside>
+    <main id="map"></main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+  <script>
+    // Mapa base
+    const map = L.map('map').setView([36.5, -119.5], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18, attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    let layerBBox, layerPts, layerCircles, maskLayer, tempLine;
+    let maskPolygon = null; // GeoJSON Polygon
+    let drawing = false;
+    let tempLatLngs = [];
+
+    function kmToDegLat(km){ return km / 111.0; }
+    function kmToDegLng(km, latDeg){ return km / (111.320 * Math.cos(latDeg * Math.PI/180)); }
+
+    function generatePoints(latMin, latMax, lngMin, lngMax, spacingKm){
+      const pts = [];
+      let lat = latMin;
+      while(lat <= latMax + 1e-9){
+        const lngStep = kmToDegLng(spacingKm, lat);
+        let lng = lngMin;
+        while(lng <= lngMax + 1e-9){
+          pts.push(turf.point([+lng.toFixed(6), +lat.toFixed(6)], {lat:+lat.toFixed(6), lng:+lng.toFixed(6)}));
+          lng += lngStep;
+        }
+        lat += kmToDegLat(spacingKm);
+      }
+      return pts;
+    }
+
+    function draw(){
+      const latMin = +document.getElementById('lat_min').value;
+      const latMax = +document.getElementById('lat_max').value;
+      const lngMin = +document.getElementById('lng_min').value;
+      const lngMax = +document.getElementById('lng_max').value;
+      const spacingKm = +document.getElementById('spacing_km').value;
+      const radiusM = +document.getElementById('radius_m').value;
+
+      // Limpia capas anteriores salvo máscara
+      [layerBBox, layerPts, layerCircles].forEach(l => { if(l){ map.removeLayer(l); } });
+
+      // Dibujar BBox
+      const bounds = [[latMin, lngMin],[latMax, lngMax]];
+      layerBBox = L.rectangle(bounds, {color:'#5fb0ff', weight:1, fill:false}).addTo(map);
+      map.fitBounds(bounds, {padding:[20,20]});
+
+      // Puntos del grid
+      let features = generatePoints(latMin, latMax, lngMin, lngMax, spacingKm);
+
+      // Filtrar por máscara si existe
+      if(maskPolygon){
+        features = features.filter(pt => turf.booleanPointInPolygon(pt, maskPolygon));
+      }
+
+      const fc = turf.featureCollection(features);
+
+      // Puntos visuales
+      layerPts = L.geoJSON(fc, {
+        pointToLayer: (feat, latlng) => L.circleMarker(latlng, {radius:3, color:'#9ad0ff', weight:1})
+      }).addTo(map);
+
+      // Círculos de cobertura
+      const circleFeats = features.map(pt => turf.circle(pt.geometry.coordinates, radiusM, {steps: 32, units: 'meters'}));
+      layerCircles = L.geoJSON(turf.featureCollection(circleFeats), {
+        style: {color:'#2a7be3', weight:0.6, opacity:0.45, fillOpacity:0.05}
+      }).addTo(map);
+
+      // Tabla
+      const tbody = document.querySelector('#tbl tbody');
+      tbody.innerHTML = '';
+      features.forEach((f, i) => {
+        const tr = document.createElement('tr');
+        const lat = f.properties.lat.toFixed(6);
+        const lng = f.properties.lng.toFixed(6);
+        tr.innerHTML = `<td>${i+1}</td><td>${lat}</td><td>${lng}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('stats').textContent = features.length + ' puntos';
+    }
+
+    function download(filename, text){
+      const a = document.createElement('a');
+      a.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+      a.setAttribute('download', filename);
+      a.style.display='none';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+
+    function exportPointsGeoJSON(){
+      const latMin = +document.getElementById('lat_min').value;
+      const latMax = +document.getElementById('lat_max').value;
+      const lngMin = +document.getElementById('lng_min').value;
+      const lngMax = +document.getElementById('lng_max').value;
+      const spacingKm = +document.getElementById('spacing_km').value;
+      let features = generatePoints(latMin, latMax, lngMin, lngMax, spacingKm);
+      if(maskPolygon){ features = features.filter(pt => turf.booleanPointInPolygon(pt, maskPolygon)); }
+      const fc = turf.featureCollection(features);
+      download('grid_points.geojson', JSON.stringify(fc,null,2));
+    }
+
+    function exportPointsCSV(){
+      const latMin = +document.getElementById('lat_min').value;
+      const latMax = +document.getElementById('lat_max').value;
+      const lngMin = +document.getElementById('lng_min').value;
+      const lngMax = +document.getElementById('lng_max').value;
+      const spacingKm = +document.getElementById('spacing_km').value;
+      let features = generatePoints(latMin, latMax, lngMin, lngMax, spacingKm);
+      if(maskPolygon){ features = features.filter(pt => turf.booleanPointInPolygon(pt, maskPolygon)); }
+      const rows = [['lat','lng']];
+      features.forEach(f => rows.push([f.properties.lat.toFixed(6), f.properties.lng.toFixed(6)]));
+      const csv = rows.map(r => r.join(',')).join('\n');
+      download('grid_points.csv', csv);
+    }
+
+    // --- Dibujo de máscara ---
+    function startMask(){
+      drawing = true; tempLatLngs = [];
+      if(tempLine){ map.removeLayer(tempLine); tempLine = null; }
+      map.getContainer().style.cursor = 'crosshair';
+      document.getElementById('btnCloseMask').disabled = false;
+    }
+
+    function closeAndApplyMask(){
+      if(tempLatLngs.length < 3){ alert('Añade al menos 3 puntos para cerrar el polígono.'); return; }
+      const latlngs = tempLatLngs.slice();
+      if(maskLayer){ map.removeLayer(maskLayer); }
+      maskLayer = L.polygon(latlngs, {color:'#ffb74d', weight:1, fillOpacity:0.08}).addTo(map);
+      // GeoJSON Polygon (lng,lat)
+      const ring = latlngs.map(p => [p.lng, p.lat]);
+      ring.push([latlngs[0].lng, latlngs[0].lat]); // cerrar
+      maskPolygon = turf.polygon([ring]);
+      drawing = false; tempLatLngs = [];
+      if(tempLine){ map.removeLayer(tempLine); tempLine = null; }
+      document.getElementById('btnClearMask').disabled = false;
+      document.getElementById('btnExportMask').disabled = false;
+      map.getContainer().style.cursor = '';
+      draw();
+    }
+
+    function clearMask(){
+      maskPolygon = null; if(maskLayer){ map.removeLayer(maskLayer); maskLayer = null; }
+      if(tempLine){ map.removeLayer(tempLine); tempLine = null; }
+      tempLatLngs = []; drawing = false;
+      document.getElementById('btnCloseMask').disabled = true;
+      document.getElementById('btnClearMask').disabled = true;
+      document.getElementById('btnExportMask').disabled = true;
+      map.getContainer().style.cursor = '';
+      draw();
+    }
+
+    map.on('click', (e) => {
+      if(!drawing) return;
+      tempLatLngs.push(e.latlng);
+      if(!tempLine){ tempLine = L.polyline(tempLatLngs, {color:'#ffb74d', weight:1}).addTo(map); }
+      else { tempLine.setLatLngs(tempLatLngs); }
+    });
+
+    // Cargar GeoJSON (Polygon/MultiPolygon)
+    document.getElementById('fileGeo').addEventListener('change', (ev) => {
+      const file = ev.target.files && ev.target.files[0];
+      if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const gj = JSON.parse(String(reader.result));
+          let poly = null;
+          if(gj.type === 'FeatureCollection'){
+            for(const f of gj.features){ if(f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')){ poly = f; break; } }
+          } else if(gj.type === 'Feature' && gj.geometry && (gj.geometry.type === 'Polygon' || gj.geometry.type === 'MultiPolygon')){
+            poly = gj;
+          } else if(gj.type === 'Polygon' || gj.type === 'MultiPolygon'){
+            poly = { type:'Feature', geometry: gj, properties:{} };
+          }
+          if(!poly){ alert('No se encontró Polygon/MultiPolygon en el GeoJSON.'); return; }
+          // Unificar MultiPolygon -> Polygon (turf.union)
+          let geom = poly.geometry;
+          if(geom.type === 'MultiPolygon'){
+            // Convertir MultiPolygon a colec. y unir
+            const features = geom.coordinates.map(coords => turf.polygon(coords));
+            let merged = features[0];
+            for(let i=1;i<features.length;i++){ merged = turf.union(merged, features[i]); }
+            geom = merged.geometry;
+          }
+          maskPolygon = { type:'Feature', geometry: geom, properties:{} };
+          if(maskLayer){ map.removeLayer(maskLayer); }
+          maskLayer = L.geoJSON(maskPolygon, {style:{color:'#ffb74d', weight:1, fillOpacity:0.08}}).addTo(map);
+          document.getElementById('btnClearMask').disabled = false;
+          document.getElementById('btnExportMask').disabled = false;
+          draw();
+        } catch(err){
+          alert('Error al leer GeoJSON: ' + err);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // Exportar máscara
+    document.getElementById('btnExportMask').addEventListener('click', () => {
+      if(!maskPolygon){ return; }
+      download('mask_polygon.geojson', JSON.stringify(maskPolygon, null, 2));
+    });
+
+    document.getElementById('btnGen').addEventListener('click', draw);
+    document.getElementById('btnExportPts').addEventListener('click', exportPointsGeoJSON);
+    document.getElementById('btnExportCsv').addEventListener('click', exportPointsCSV);
+    document.getElementById('btnStartMask').addEventListener('click', startMask);
+    document.getElementById('btnCloseMask').addEventListener('click', closeAndApplyMask);
+    document.getElementById('btnClearMask').addEventListener('click', clearMask);
+
+    // Dibuja al cargar
+    draw();
+  </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+# Archivos de configuración sensibles
+.env
+.env.local
+.env.*.local
+*.env
+
+# Credenciales de Google Service Account
+*.json
+!example-service-account.json
+majestic-camp-*.json
+
+# API Keys y configuraciones secretas
+config.py
+secrets.py
+credentials.py
+
+# Archivos de salida CSV
+*.csv
+output*.csv
+results*.csv
+data/*.csv
+
+# Logs
+*.log
+logs/
+*.out
+
+# Cache de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Backup files
+*.bak
+*.backup
+
+# Database files (si usas alguna)
+*.db
+*.sqlite
+*.sqlite3
+
+# Excel files temporales
+~$*.xlsx
+~$*.xls
+
+# Archivos de estado temporal
+last_position.txt
+checkpoint.txt
+state.json
+
+# Archivos de test
+test_output/
+test_results/
