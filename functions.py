@@ -1,4 +1,5 @@
 
+from tkinter import messagebox
 from typing import Iterable, List, Optional, Sequence, Tuple
 import math
 import time
@@ -527,6 +528,9 @@ def collect_for_state(
             append_rows_with_retry(svc, sheet_id, tab_title_resolved, buffered_rows)
         if csv_file:
             csv_file.close()
+
+    #mostrar message box de tkinter indicando que ya finalizo
+    messagebox.showinfo("Proceso completado", "La recolección de datos ha finalizado.")
 
     print(f"Done. State: {bbox.state_name} | Unique places added this run: {len(seen) - len(existing_place_ids)} | API requests: {total_requests}")
 
