@@ -1,6 +1,5 @@
-
 from tkinter import messagebox
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 import math
 import time
 import requests
@@ -13,6 +12,7 @@ import csv
 import socket, ssl
 from datetime import date
 from dataclasses import dataclass
+import re
 from scraping import find_emails_on_site
 
 try:
@@ -46,13 +46,19 @@ GOOGLE_SERVICE_ACCOUNT_JSON = os.getenv("GOOGLESERVICE")  # path to JSON
 TARGET_STATE_DEFAULT = os.getenv("TARGET_STATE", "CA")
 STATE_BBOX_FILE_DEFAULT = os.getenv("STATE_BBOX_FILE")  # optional CSV path
 GRID_SPACING_KM_DEFAULT = float(os.getenv("GRID_SPACING_KM", "30"))
-RADIUS_M_DEFAULT = int(os.getenv("RADIUS_M", "30000"))
+RADIUS_M_DEFAULT = int(os.getenv("RADIUS_M", "25000"))
 CSV_OUTPUT_DEFAULT = os.getenv("CSV_OUTPUT")  # optional
 PACE_S_DEFAULT = float(os.getenv("PACE_SECONDS", "1.0"))
 FLUSH_EVERY_DEFAULT = int(os.getenv("FLUSH_EVERY", "10"))            # guardar cada 10
 CHUNK_APPEND_ROWS_DEFAULT = int(os.getenv("CHUNK_APPEND_ROWS", "50"))  # tamaño de cada lote a Sheets
 SHEETS_APPEND_PACE_S_DEFAULT = float(os.getenv("SHEETS_PACE_SECONDS", "0.2"))  # pausa entre lotes
 
+# Optimizaciones
+KEYWORD_STRATEGY_DEFAULT = os.getenv("KEYWORD_STRATEGY", "all")  # all, combined, first
+MAX_KEYWORDS_PER_CENTER_DEFAULT = int(os.getenv("MAX_KEYWORDS_PER_CENTER", "0")) or None
+STOP_AFTER_NEW_DEFAULT = int(os.getenv("STOP_AFTER_NEW", "0")) or None
+SKIP_OVERLAP_CENTERS_DEFAULT = os.getenv("SKIP_OVERLAP_CENTERS", "0") == "1"
+OVERLAP_FACTOR_DEFAULT = float(os.getenv("OVERLAP_FACTOR", "0.6"))
 
 # Keywords: comma-separated in env -> list
 _ENV_KW = os.getenv("KEYWORDS")
@@ -84,11 +90,6 @@ DEFAULT_STATE_BBOX = {
         "lng_max": -114.1,
     }
 }
-
-# Heuristic filter to cut common non-music "studio" false-positives
-
-
-
 
 # Google Maps URL fallback pattern when 'url' isn't present in details
 MAPS_PLACE_URL = "https://www.google.com/maps/place/?q=place_id:{place_id}"
@@ -243,6 +244,38 @@ def likely_music_studio(name_lower: str) -> bool:
 
 def should_exclude(name_lower: str) -> bool:
     return any(bad in name_lower for bad in EXCLUDE_IF_NAME_CONTAINS)
+
+# ---------------------- Optimización keywords -----------------------
+
+def tokenize_keywords(keywords: Sequence[str]) -> Set[str]:
+    """Extrae tokens únicos de un conjunto de keywords."""
+    tokens = set()
+    for kw in keywords:
+        for token in re.findall(r'\b\w+\b', kw.lower()):
+            if len(token) > 2:  # Ignorar tokens muy cortos
+                tokens.add(token)
+    return tokens
+
+def combine_keywords(keywords: Sequence[str], max_tokens: int = 8) -> str:
+    """Combina múltiples keywords en una sola consulta."""
+    tokens = tokenize_keywords(keywords)
+    # Priorizar tokens clave de música
+    priority_tokens = [t for t in tokens if t in ["recording", "studio", "music", "audio", "mix", "master"]]
+    other_tokens = [t for t in tokens if t not in priority_tokens]
+    
+    # Usar primero tokens prioritarios, luego otros hasta el límite
+    selected = priority_tokens + other_tokens
+    if len(selected) > max_tokens:
+        selected = selected[:max_tokens]
+    
+    return " ".join(selected)
+
+def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Calcula distancia aproximada en metros entre dos puntos."""
+    # Fórmula haversine simplificada para distancias cortas
+    dx = 111320 * math.cos(math.radians((lat1 + lat2) / 2)) * (lng2 - lng1)
+    dy = 111320 * (lat2 - lat1)
+    return math.sqrt(dx*dx + dy*dy)
 
 # ---------------------- Google Sheets helpers ---------------------
 
@@ -407,12 +440,18 @@ def collect_for_state(
     bbox: BBox,
     keywords: Sequence[str] = DEFAULT_KEYWORDS,
     grid_spacing_km: float = 30.0,
-    radius_m: int = 30000,
+    radius_m: int = 25000,
     csv_output: Optional[str] = None,
     pace_s: float = 1.0,
     tab_title: Optional[str] = None,
     tab_title_template: Optional[str] = None,
     centers_override: Optional[Sequence[Tuple[float, float]]] = None,
+    # Nuevos parámetros de optimización
+    keyword_strategy: str = "all",
+    max_keywords_per_center: Optional[int] = None,
+    stop_after_new: Optional[int] = None,
+    skip_overlap_centers: bool = False,
+    overlap_factor: float = 0.6,
 ) -> None:
     """Sweep a state bbox and write new rows to its tab in the Sheet."""
     # Build Sheets client and ensure tab+headers
@@ -434,7 +473,10 @@ def collect_for_state(
 
     total_requests = 0
     buffered_rows: List[List] = []
-    flush_every = FLUSH_EVERY_DEFAULT  
+    flush_every = FLUSH_EVERY_DEFAULT
+    
+    # Seguimiento para la optimización de solapamiento
+    processed_centers = []  # [(lat, lng, nuevos_encontrados), ...]
 
     try:
         # elegir la fuente de centros
@@ -445,19 +487,69 @@ def collect_for_state(
             centers_iter = generate_grid(bbox.lat_min, bbox.lat_max, bbox.lng_min, bbox.lng_max, grid_spacing_km)
             print("[Centers] Usando grid generado")
 
+        # Preparar keywords según la estrategia elegida
+        effective_keywords = list(keywords)  # copia para no modificar original
+        
+        if keyword_strategy == "first" and effective_keywords:
+            effective_keywords = [effective_keywords[0]]
+            print(f"[Optimize] Estrategia 'first': usando sólo la primera keyword: '{effective_keywords[0]}'")
+        elif keyword_strategy == "combined" and effective_keywords:
+            combined = combine_keywords(effective_keywords)
+            effective_keywords = [combined]
+            print(f"[Optimize] Estrategia 'combined': combinando {len(keywords)} keywords en una sola: '{combined}'")
+        
+        # Limitar keywords por centro si se especificó
+        if max_keywords_per_center is not None and max_keywords_per_center > 0:
+            if max_keywords_per_center < len(effective_keywords):
+                effective_keywords = effective_keywords[:max_keywords_per_center]
+                print(f"[Optimize] Limitando a {max_keywords_per_center} keywords por centro")
+
         for center_lat, center_lng in centers_iter:
-            for keyword in keywords:
+            # Verificar si debemos saltar este centro por solapamiento
+            if skip_overlap_centers and processed_centers:
+                skip = False
+                overlap_dist = overlap_factor * radius_m
+                
+                for pc_lat, pc_lng, found_count in processed_centers:
+                    if found_count >= (stop_after_new or 1):  # Sólo consideramos centros que produjeron resultados
+                        dist = calculate_distance(center_lat, center_lng, pc_lat, pc_lng)
+                        if dist < overlap_dist:
+                            skip = True
+                            print(f"[Optimize] Saltando centro ({center_lat}, {center_lng}) por solapamiento con centro previo a {dist:.0f}m")
+                            break
+                
+                if skip:
+                    continue
+            
+            # Contador de nuevos lugares encontrados en este centro
+            new_places_this_center = 0
+            
+            # Para cada keyword, buscar lugares cercanos
+            for keyword_idx, keyword in enumerate(effective_keywords):
+                # Si ya alcanzamos el límite de nuevos lugares para este centro, pasar al siguiente
+                if stop_after_new is not None and new_places_this_center >= stop_after_new:
+                    print(f"[Optimize] Alcanzado límite de {stop_after_new} nuevos lugares en este centro. Pasando al siguiente.")
+                    break
+                
                 print(f"Searching '{keyword}' around ({center_lat}, {center_lng})")
                 data = nearby_search(api_key, center_lat, center_lng, keyword, radius_m)
                 total_requests += 1
                 time.sleep(pace_s)
 
+                page_count = 1
                 while True:
                     results = data.get("results", [])
+                    # Si es página 2+ y no encontramos nada nuevo en la primera página, cortar
+                    if page_count > 1 and new_places_this_center == 0:
+                        print(f"[Optimize] La primera página no produjo resultados nuevos. Omitiendo páginas adicionales.")
+                        break
+                    
+                    # Procesar resultados
                     for res in results:
                         pid = res.get("place_id")
                         if not pid or pid in seen:
                             continue
+                            
                         name = (res.get("name") or "").strip()
                         name_lower = name.lower()
                         if should_exclude(name_lower) and not any(h in name_lower for h in ["record", "mix", "master", "audio", "music", "recording"]):
@@ -505,6 +597,8 @@ def collect_for_state(
                         ]
                         buffered_rows.append(row)
                         seen.add(pid)
+                        new_places_this_center += 1
+                        
                         if csv_writer:
                             csv_writer.writerow(row)
 
@@ -512,16 +606,27 @@ def collect_for_state(
                             print(f"Flushing {len(buffered_rows)} rows to Google Sheets...")
                             append_rows_with_retry(svc, sheet_id, tab_title_resolved, buffered_rows)
                             buffered_rows.clear()
-
-                    token = data.get("next_page_token")
-                    if not token:
+                        
+                        # Verificar si alcanzamos el límite de nuevos lugares por centro
+                        if stop_after_new is not None and new_places_this_center >= stop_after_new:
+                            print(f"[Optimize] Alcanzado límite de {stop_after_new} nuevos lugares en este centro durante procesamiento.")
+                            break
+                    
+                    # Si alcanzamos el límite o no hay token para siguiente página, salir
+                    if (stop_after_new is not None and new_places_this_center >= stop_after_new) or not data.get("next_page_token"):
                         break
-                    time.sleep(2.0)
-                    data = nearby_search(api_key, center_lat, center_lng, keyword, radius_m, pagetoken=token)
-                    cnt = len(data.get("results", []))
-                    print(f" → {cnt} resultados")
+                    
+                    # Procesar siguiente página
+                    time.sleep(2.0)  # Necesario para que el token sea válido
+                    data = nearby_search(api_key, center_lat, center_lng, keyword, radius_m, pagetoken=data.get("next_page_token"))
+                    page_count += 1
+                    print(f" → Página {page_count}: {len(data.get('results', []))} resultados")
                     total_requests += 1
                     time.sleep(pace_s)
+            
+            # Registrar este centro como procesado para optimización de solapamiento
+            processed_centers.append((center_lat, center_lng, new_places_this_center))
+            print(f"[Centro {center_lat},{center_lng}] Nuevos lugares encontrados: {new_places_this_center}")
     finally:
         if buffered_rows:
             print(f"Final flush of {len(buffered_rows)} rows to Google Sheets...")
@@ -530,8 +635,6 @@ def collect_for_state(
             csv_file.close()
 
     #mostrar message box de tkinter indicando que ya finalizo
-    messagebox.showinfo("Proceso completado", "La recolección de datos ha finalizado.")
-
     print(f"Done. State: {bbox.state_name} | Unique places added this run: {len(seen) - len(existing_place_ids)} | API requests: {total_requests}")
 
 # ---------------------- Main / CLI ---------------------------------
@@ -580,7 +683,19 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--sheet-tab", default=SHEET_TAB_EXPLICIT, help="Exact tab title override")
     p.add_argument("--sheet-tab-template", default=SHEET_TAB_TEMPLATE, help="Tab template using {state_code} {state_name} {yyyymmdd}")
 
-    p.add_argument("--centers-csv", default=CENTERS_CSV_DEFAULT,help="CSV con columnas lat,lng para usar como centros (override del grid)")
+    p.add_argument("--centers-csv", default=CENTERS_CSV_DEFAULT, help="CSV con columnas lat,lng para usar como centros (override del grid)")
+    
+    # Nuevos parámetros de optimización
+    p.add_argument("--keyword-strategy", choices=["all", "combined", "first"], default=KEYWORD_STRATEGY_DEFAULT,
+                  help="Estrategia de keywords: 'all'=una búsqueda por keyword, 'combined'=tokens combinados, 'first'=sólo primera keyword")
+    p.add_argument("--max-keywords-per-center", type=int, default=MAX_KEYWORDS_PER_CENTER_DEFAULT,
+                  help="Limitar cuántas keywords usar por centro (0=todas)")
+    p.add_argument("--stop-after-new", type=int, default=STOP_AFTER_NEW_DEFAULT,
+                  help="Dejar de buscar en un centro después de encontrar N nuevos lugares (0=sin límite)")
+    p.add_argument("--skip-overlap-centers", action="store_true", default=SKIP_OVERLAP_CENTERS_DEFAULT,
+                  help="Saltar centros que estén muy cerca de otros ya procesados con éxito")
+    p.add_argument("--overlap-factor", type=float, default=OVERLAP_FACTOR_DEFAULT,
+                  help="Factor para determinar cuándo dos centros se solapan (0.6 = 60% del radio)")
 
     return p.parse_args(argv)
 
@@ -595,4 +710,3 @@ def resolve_tab_title(bbox: BBox, explicit_tab: Optional[str], template: Optiona
             yyyymmdd=today.strftime("%Y%m%d"),
         )
     return bbox.state_name
-
