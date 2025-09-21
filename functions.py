@@ -307,44 +307,52 @@ def build_sheets_service(service_account_json: str):
 
 
 def ensure_tab_and_headers(svc, spreadsheet_id: str, tab_title: str) -> None:
-    """Create tab if missing and ensure header row is present."""
+    """Create tab if missing and ensure header row is present (idempotent)."""
     try:
-        if DEBUG_SHEET:
-            print(f"[Sheets] Ensuring tab and headers in spreadsheet={spreadsheet_id}, tab='{tab_title}'")
         meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         sheets = meta.get("sheets", [])
         titles = {s["properties"]["title"] for s in sheets}
-        requests_body = {"requests": []}
+
+        # 1) Crear la pestaña si no existe (manejar carrera/duplicado)
         if tab_title not in titles:
-            requests_body["requests"].append({
-                "addSheet": {
-                    "properties": {
-                        "title": tab_title,
-                        "gridProperties": {"rowCount": 5000, "columnCount": 20}
-                    }
-                }
-            })
-        if requests_body["requests"]:
-            if DEBUG_SHEET:
-                print(f"[Sheets] Creating missing tab '{tab_title}'")
-            svc.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id, body=requests_body
-            ).execute()
-        # Write headers if A1 is empty
+            try:
+                svc.spreadsheets().batchUpdate(
+                    spreadsheetId=spreadsheet_id,
+                    body={"requests": [{"addSheet": {
+                        "properties": {
+                            "title": tab_title,
+                            "gridProperties": {"rowCount": 5000, "columnCount": 20}
+                        }
+                    }}]}
+                ).execute()
+                if DEBUG_SHEET:
+                    print(f"[Sheets] Created tab '{tab_title}'")
+            except HttpError as e:
+                # Si otro proceso la creó mientras tanto, Google devuelve 400 "already exists"
+                msg = getattr(e, "content", b"").decode("utf-8", errors="ignore")
+                if "already exists" in msg:
+                    if DEBUG_SHEET:
+                        print(f"[Sheets] Tab '{tab_title}' already existed (race) — continuing")
+                else:
+                    raise
+
+        # 2) Escribir headers si A1 está vacío
         rng = f"{tab_title}!A1:{_col_letter_from_index_one_based(len(HEADERS))}1"
         res = svc.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=rng).execute()
         values = res.get("values")
         if not values:
+            if DEBUG_SHEET:
+                print(f"[Sheets] Writing headers to '{tab_title}'")
             svc.spreadsheets().values().update(
                 spreadsheetId=spreadsheet_id,
                 range=rng,
                 valueInputOption="RAW",
                 body={"values": [HEADERS]},
             ).execute()
+
     except HttpError as e:
         print(f"[Sheets] ERROR ensuring tab/headers: {e}")
         raise
-
 
 def read_existing_place_ids(svc, spreadsheet_id: str, tab_title: str) -> set:
     rng = f"{tab_title}!{PLACE_ID_COL_LETTER}2:{PLACE_ID_COL_LETTER}"
@@ -363,7 +371,7 @@ def append_rows_to_sheet(svc, spreadsheet_id: str, tab_title: str, rows: List[Li
         return
     if DEBUG_SHEET:
         print(f"[Sheets] Appending {len(rows)} rows to tab '{tab_title}'")
-        
+
     rng = f"{tab_title}!A2"
     try:
         svc.spreadsheets().values().append(

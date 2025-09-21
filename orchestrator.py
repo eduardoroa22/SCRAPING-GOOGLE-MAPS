@@ -78,7 +78,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     for csv_path in paths:
         filename = os.path.basename(csv_path)
         state_code = os.path.splitext(filename)[0].upper()  # p.ej. CA.csv -> CA
-        print(f"\n[Runner] === Estado {state_code} ===")
+        print(f"[Runner] CSV: {csv_path}")
 
         try:
             centers = load_centers_csv(csv_path)
