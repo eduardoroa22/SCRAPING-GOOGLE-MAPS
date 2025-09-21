@@ -41,9 +41,21 @@
         <div class="chips" id="quickStates"></div>
         <label>Más estados (select):</label>
         <select id="stateSelect"></select>
-        <div>
-          <button class="btn" id="btnApplyState">Aplicar BBox del estado</button>
+
+               <div>
+            <button class="btn" id="btnApplyState">Aplicar BBox del estado</button>
         </div>
+        <hr style="border-color:#233041;margin:12px 0;">
+        <h3 style="margin:4px 0 6px;font-size:14px">🏔️ Ciudades de Alaska (áreas pequeñas)</h3>
+        <label>Seleccionar ciudad de Alaska:</label>
+        <select id="alaskaCitySelect">
+            <option value="">-- Selecciona una ciudad --</option>
+        </select>
+        <div>
+            <button class="btn" id="btnApplyAlaskaCity">Aplicar área de ciudad</button>
+        </div>
+        <div class="hint">Áreas pequeñas de ~15-25km de radio alrededor de las principales ciudades de Alaska.</div>
+        
         <div class="hint">El BBox puede abarcar mar o estados vecinos. Usa la <b>Máscara</b> para recortar con el polígono del estado si lo deseas.</div>
 
         <hr style="border-color:#233041;margin:12px 0;">
@@ -182,15 +194,105 @@
       "MD": {name:"Maryland", lat_min:37.91, lat_max:39.72, lng_min:-79.49, lng_max:-75.05},
 
       // Distrito de Columbia
-      "DC": {name:"Washington D.C.", lat_min:38.79, lat_max:38.99, lng_min:-77.12, lng_max:-76.91}
+      "DC": {name:"Washington D.C.", lat_min:38.79, lat_max:38.99, lng_min:-77.12, lng_max:-76.91},
+      //puerto rico
+      "PR": {name:"Puerto Rico", lat_min:17.91, lat_max:18.52, lng_min:-67.94, lng_max:-65.22},
+
     };
+
+        const ALASKA_CITIES = {
+        
+        "juneau": {
+            name: "Juneau",
+            lat_center: 58.3019,
+            lng_center: -134.4197,
+            lat_min: 58.2000,
+            lat_max: 58.4500,
+            lng_min: -134.7000,
+            lng_max: -134.1000
+        },
+        "sitka": {
+            name: "Sitka",
+            lat_center: 57.0531,
+            lng_center: -135.3300,
+            lat_min: 56.9500,
+            lat_max: 57.1500,
+            lng_min: -135.5000,
+            lng_max: -135.1000
+        },
+        "ketchikan": {
+            name: "Ketchikan",
+            lat_center: 55.3422,
+            lng_center: -131.6461,
+            lat_min: 55.2500,
+            lat_max: 55.4500,
+            lng_min: -131.8000,
+            lng_max: -131.5000
+        },
+        "kodiak": {
+            name: "Kodiak",
+            lat_center: 57.7900,
+            lng_center: -152.4072,
+            lat_min: 57.7000,
+            lat_max: 57.8800,
+            lng_min: -152.6000,
+            lng_max: -152.2000
+        },
+        "nome": {
+            name: "Nome",
+            lat_center: 64.5011,
+            lng_center: -165.4064,
+            lat_min: 64.4200,
+            lat_max: 64.5800,
+            lng_min: -165.6000,
+            lng_max: -165.2000
+        },
+        "barrow": {
+            name: "Utqiagvik (Barrow)",
+            lat_center: 71.2906,
+            lng_center: -156.7886,
+            lat_min: 71.2000,
+            lat_max: 71.3800,
+            lng_min: -157.0000,
+            lng_max: -156.5000
+        },
+        "kenai": {
+            name: "Kenai",
+            lat_center: 60.5544,
+            lng_center: -151.2583,
+            lat_min: 60.4500,
+            lat_max: 60.6500,
+            lng_min: -151.5000,
+            lng_max: -151.0000
+        },
+        "palmer": {
+            name: "Palmer",
+            lat_center: 61.5997,
+            lng_center: -149.1128,
+            lat_min: 61.5000,
+            lat_max: 61.7000,
+            lng_min: -149.3000,
+            lng_max: -148.9000
+        },
+        "wasilla": {
+            name: "Wasilla",
+            lat_center: 61.5814,
+            lng_center: -149.4394,
+            lat_min: 61.4800,
+            lat_max: 61.6800,
+            lng_min: -149.6000,
+            lng_max: -149.2000
+        }
+    };
+
 
     const QUICK = ["CA","TX","FL","NY","PA","IL","OH","GA","NC","MI"]; // chips rápidos (estados más populares)
 
     // Mapa base
     const map = L.map('map').setView([39.8, -98.6], 4); // Centrado en USA
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18, attribution: '&copy; OpenStreetMap'
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
     }).addTo(map);
 
     let layerBBox, layerPts, layerCircles, maskLayer, tempLine;
@@ -390,42 +492,64 @@
     document.getElementById('btnClearMask').addEventListener('click', clearMask);
 
     // --- UI Estados ---
-    function applyBBox(b){
-      document.getElementById('lat_min').value = b.lat_min.toFixed(6);
-      document.getElementById('lat_max').value = b.lat_max.toFixed(6);
-      document.getElementById('lng_min').value = b.lng_min.toFixed(6);
-      document.getElementById('lng_max').value = b.lng_max.toFixed(6);
-      draw();
+    function applyAlaskaCity(city){
+        document.getElementById('lat_min').value = city.lat_min.toFixed(6);
+        document.getElementById('lat_max').value = city.lat_max.toFixed(6);
+        document.getElementById('lng_min').value = city.lng_min.toFixed(6);
+        document.getElementById('lng_max').value = city.lng_max.toFixed(6);
+        
+        // Ajustar espaciado para áreas pequeñas
+        document.getElementById('spacing_km').value = "5"; // Grid más denso para ciudades
+        document.getElementById('radius_m').value = "8000"; // Radio menor para búsquedas urbanas
+        
+        draw();
     }
 
     // chips rápidos (estados más populares)
     const quick = document.getElementById('quickStates');
     QUICK.forEach(code => {
-      const b = STATE_BBOXES[code];
-      if(!b) return;
-      const el = document.createElement('button');
-      el.className = 'chip';
-      el.textContent = b.name;
-      el.title = code;
-      el.addEventListener('click', () => applyBBox(b));
-      quick.appendChild(el);
+        const b = STATE_BBOXES[code];
+        if(!b) return;
+        const el = document.createElement('button');
+        el.className = 'chip';
+        el.textContent = b.name;
+        el.title = code;
+        el.addEventListener('click', () => applyBBox(b));
+        quick.appendChild(el);
     });
 
-    // select completo con TODOS los estados
+    // select completo con TODOS los estados - existing code
     const sel = document.getElementById('stateSelect');
     Object.entries(STATE_BBOXES).sort((a,b)=> a[1].name.localeCompare(b[1].name)).forEach(([code, b]) => {
-      const opt = document.createElement('option');
-      opt.value = code; opt.textContent = `${b.name} (${code})`;
-      sel.appendChild(opt);
+        const opt = document.createElement('option');
+        opt.value = code; opt.textContent = `${b.name} (${code})`;
+        sel.appendChild(opt);
     });
     document.getElementById('btnApplyState').addEventListener('click', () => {
-      const code = sel.value; if(!code) return;
-      const b = STATE_BBOXES[code]; if(!b) return;
-      applyBBox(b);
+        const code = sel.value; if(!code) return;
+        const b = STATE_BBOXES[code]; if(!b) return;
+        applyBBox(b);
+    });
+
+    // ✅ NUEVO: Selector de ciudades de Alaska
+    const alaskaSel = document.getElementById('alaskaCitySelect');
+    Object.entries(ALASKA_CITIES).sort((a,b)=> a[1].name.localeCompare(b[1].name)).forEach(([code, city]) => {
+        const opt = document.createElement('option');
+        opt.value = code; 
+        opt.textContent = `${city.name}`;
+        alaskaSel.appendChild(opt);
+    });
+
+    document.getElementById('btnApplyAlaskaCity').addEventListener('click', () => {
+        const code = alaskaSel.value; 
+        if(!code) return;
+        const city = ALASKA_CITIES[code]; 
+        if(!city) return;
+        applyAlaskaCity(city);
     });
 
     // Dibuja al cargar (por defecto California)
     draw();
-  </script>
+</script>
 </body>
 </html>

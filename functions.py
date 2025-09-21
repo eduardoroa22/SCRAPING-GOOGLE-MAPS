@@ -1,5 +1,4 @@
-from tkinter import messagebox
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
 import math
 import time
 import requests
@@ -20,6 +19,14 @@ try:
     load_dotenv()
 except Exception:
     pass
+
+@dataclass
+class RunResult:
+    state_code: str
+    state_name: str
+    sheet_tab: str
+    added_count: int
+    api_requests: int
 
 @dataclass
 class BBox:
@@ -357,9 +364,9 @@ def append_rows_with_retry(
     spreadsheet_id: str,
     tab_title: str,
     rows: List[List],
-    max_attempts: int = 5,
+    max_attempts: int = 10,
     chunk_size: int = CHUNK_APPEND_ROWS_DEFAULT,
-    base_backoff: float = 1.8,
+    base_backoff: float = 5.0,
     sheets_pace_s: float = SHEETS_APPEND_PACE_S_DEFAULT,
     ):
     """Append con reintentos + chunking para robustecer contra fallos de red."""
@@ -634,8 +641,16 @@ def collect_for_state(
         if csv_file:
             csv_file.close()
 
-    #mostrar message box de tkinter indicando que ya finalizo
-    print(f"Done. State: {bbox.state_name} | Unique places added this run: {len(seen) - len(existing_place_ids)} | API requests: {total_requests}")
+    added = len(seen) - len(existing_place_ids)
+    print(f"Done. State: {bbox.state_name} | Unique places added this run: {added} | API requests: {total_requests}")
+
+    return RunResult(
+        state_code=bbox.state_code,
+        state_name=bbox.state_name,
+        sheet_tab=tab_title_resolved,
+        added_count=added,
+        api_requests=total_requests,
+    )
 
 # ---------------------- Main / CLI ---------------------------------
 def load_centers_csv(path: str) -> List[Tuple[float,float]]:
