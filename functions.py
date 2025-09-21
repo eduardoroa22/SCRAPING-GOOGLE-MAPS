@@ -20,6 +20,8 @@ try:
 except Exception:
     pass
 
+DEBUG_API = os.getenv("DEBUG_API", "0") == "1"
+
 @dataclass
 class RunResult:
     state_code: str
@@ -189,31 +191,33 @@ def backoff_sleep(attempt: int, base: float = 1.7) -> None:
     time.sleep(wait)
 
 
-def nearby_search(api_key: str, lat: float, lng: float, keyword: str, radius_m: int, pagetoken: Optional[str] = None, language: str = "en", region: str = "us") -> dict:
-    params = {
-        "key": api_key,
-        "language": language,
-        "region": region,
-    }
+def nearby_search(api_key: str, lat: float, lng: float, keyword: str, radius_m: int,
+                  pagetoken: Optional[str] = None, language: str = "en", region: str = "us") -> dict:
+    params = {"key": api_key, "language": language, "region": region}
     if pagetoken:
         params["pagetoken"] = pagetoken
     else:
-        params.update({
-            "location": f"{lat},{lng}",
-            "radius": radius_m,
-            "keyword": keyword,
-        })
-    for attempt in range(1, 7):  # up to 6 backoff attempts
+        params.update({"location": f"{lat},{lng}", "radius": radius_m, "keyword": keyword})
+
+    for attempt in range(1, 7):
         r = requests.get(NEARBY_URL, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         status = data.get("status", "")
+        if DEBUG_API:
+            print(f"[Nearby] status={status} results={len(data.get('results', []))} next={bool(data.get('next_page_token'))} "
+                  f"loc=({lat},{lng}) kw='{keyword}' radius={radius_m} attempt={attempt}")
+            if status not in ("OK", "ZERO_RESULTS"):
+                em = data.get("error_message")
+                if em:
+                    print(f"[Nearby] error_message={em}")
+
         if status in ("OK", "ZERO_RESULTS"):
             return data
         if status in ("OVER_QUERY_LIMIT", "RESOURCE_EXHAUSTED", "UNKNOWN_ERROR"):
             backoff_sleep(attempt)
             continue
-        # Other statuses (INVALID_REQUEST, etc.) — return as-is
+        # REQUEST_DENIED, INVALID_REQUEST, etc.
         return data
     return {"status": "FAILED", "results": []}
 
@@ -225,6 +229,13 @@ def fetch_details(api_key: str, place_id: str) -> dict:
         r.raise_for_status()
         data = r.json()
         status = data.get("status", "")
+        if DEBUG_API:
+            print(f"[Details] status={status} place_id={place_id} attempt={attempt}")
+            if status not in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
+                em = data.get("error_message")
+                if em:
+                    print(f"[Details] error_message={em}")
+
         if status in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
             return data
         if status in ("OVER_QUERY_LIMIT", "RESOURCE_EXHAUSTED", "UNKNOWN_ERROR"):
@@ -540,6 +551,9 @@ def collect_for_state(
                 
                 print(f"Searching '{keyword}' around ({center_lat}, {center_lng})")
                 data = nearby_search(api_key, center_lat, center_lng, keyword, radius_m)
+                status = data.get("status")
+                if DEBUG_API and status not in ("OK", "ZERO_RESULTS"):
+                    print(f"[Collect] Nearby status no-OK: {status}")
                 total_requests += 1
                 time.sleep(pace_s)
 

@@ -491,6 +491,14 @@
     document.getElementById('btnCloseMask').addEventListener('click', closeAndApplyMask);
     document.getElementById('btnClearMask').addEventListener('click', clearMask);
 
+    function applyBBox(b){
+        document.getElementById('lat_min').value = b.lat_min.toFixed(6);
+        document.getElementById('lat_max').value = b.lat_max.toFixed(6);
+        document.getElementById('lng_min').value = b.lng_min.toFixed(6);
+        document.getElementById('lng_max').value = b.lng_max.toFixed(6);
+        draw();
+    }
+
     // --- UI Estados ---
     function applyAlaskaCity(city){
         document.getElementById('lat_min').value = city.lat_min.toFixed(6);
