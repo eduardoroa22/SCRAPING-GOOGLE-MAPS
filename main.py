@@ -36,7 +36,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     centers = None
     if args.centers_csv:
         centers = load_centers_csv(args.centers_csv)
-        print(f"[Config] Usando {len(centers)} centros desde CSV (override del grid)")
+        print(f"[Config] Centers CSV={args.centers_csv}")
+
+    tab_preview = resolve_tab_title(bbox, args.sheet_tab, args.sheet_tab_template)
+    print(f"[Sheets] Target Spreadsheet ID={_mask(args.sheet_id)} | Tab='{tab_preview}'")
         
     collect_for_state(
         api_key=args.api_key,

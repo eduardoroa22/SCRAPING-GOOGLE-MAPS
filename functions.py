@@ -21,6 +21,7 @@ except Exception:
     pass
 
 DEBUG_API = os.getenv("DEBUG_API", "0") == "1"
+DEBUG_SHEET = os.getenv("DEBUG_SHEET", "0") == "1"
 
 @dataclass
 class RunResult:
@@ -308,6 +309,8 @@ def build_sheets_service(service_account_json: str):
 def ensure_tab_and_headers(svc, spreadsheet_id: str, tab_title: str) -> None:
     """Create tab if missing and ensure header row is present."""
     try:
+        if DEBUG_SHEET:
+            print(f"[Sheets] Ensuring tab and headers in spreadsheet={spreadsheet_id}, tab='{tab_title}'")
         meta = svc.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
         sheets = meta.get("sheets", [])
         titles = {s["properties"]["title"] for s in sheets}
@@ -322,6 +325,8 @@ def ensure_tab_and_headers(svc, spreadsheet_id: str, tab_title: str) -> None:
                 }
             })
         if requests_body["requests"]:
+            if DEBUG_SHEET:
+                print(f"[Sheets] Creating missing tab '{tab_title}'")
             svc.spreadsheets().batchUpdate(
                 spreadsheetId=spreadsheet_id, body=requests_body
             ).execute()
@@ -356,6 +361,9 @@ def read_existing_place_ids(svc, spreadsheet_id: str, tab_title: str) -> set:
 def append_rows_to_sheet(svc, spreadsheet_id: str, tab_title: str, rows: List[List]):
     if not rows:
         return
+    if DEBUG_SHEET:
+        print(f"[Sheets] Appending {len(rows)} rows to tab '{tab_title}'")
+        
     rng = f"{tab_title}!A2"
     try:
         svc.spreadsheets().values().append(
@@ -495,6 +503,12 @@ def collect_for_state(
     
     # Seguimiento para la optimización de solapamiento
     processed_centers = []  # [(lat, lng, nuevos_encontrados), ...]
+    tab_title_resolved = resolve_tab_title(bbox, tab_title, tab_title_template)
+    if DEBUG_SHEET:
+        sa_email = get_service_account_email(service_account_json)
+        print(f"[Sheets] Using Service Account: {sa_email}")
+        print(f"[Sheets] Spreadsheet ID: {sheet_id}")
+        print(f"[Sheets] Tab to use: '{tab_title_resolved}'")
 
     try:
         # elegir la fuente de centros
@@ -739,3 +753,13 @@ def resolve_tab_title(bbox: BBox, explicit_tab: Optional[str], template: Optiona
             yyyymmdd=today.strftime("%Y%m%d"),
         )
     return bbox.state_name
+
+import json
+
+def get_service_account_email(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("client_email", "")
+    except Exception:
+        return ""
