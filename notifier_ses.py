@@ -4,11 +4,41 @@ import traceback
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-SES_REGION = os.getenv("AWS_REGION", "us-east-1")
+# Asegura cargar .env si llaman este módulo directamente
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+# Región: prioriza AWS_SES_REGION_NAME, luego AWS_REGION/AWS_DEFAULT_REGION
+SES_REGION = (
+    os.getenv("AWS_SES_REGION_NAME")
+    or os.getenv("AWS_REGION")
+    or os.getenv("AWS_DEFAULT_REGION")
+    or "us-east-1"
+)
+
 SES_SENDER = os.getenv("SES_SENDER")  # e.g. no-reply@tudominio.com (verificado en SES)
 SES_RECIPIENTS = [e.strip() for e in os.getenv("SES_RECIPIENTS", "").split(",") if e.strip()]
 
-_ses = boto3.client("ses", region_name=SES_REGION)
+# Credenciales explícitas (opcionales). Si no están, boto3 usará la credential chain (IAM Role, ~/.aws, etc.)
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")  # opcional (STS)
+
+def _build_ses_client():
+    kwargs = {"region_name": SES_REGION}
+    if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+        kwargs.update({
+            "aws_access_key_id": AWS_ACCESS_KEY_ID,
+            "aws_secret_access_key": AWS_SECRET_ACCESS_KEY,
+        })
+        if AWS_SESSION_TOKEN:
+            kwargs["aws_session_token"] = AWS_SESSION_TOKEN
+    return boto3.client("ses", **kwargs)
+
+_ses = _build_ses_client()
 
 def _send_email(subject: str, text: str, html: str | None = None) -> bool:
     if not SES_SENDER or not SES_RECIPIENTS:
@@ -53,7 +83,6 @@ def notify_failure(state_code: str, state_name: str, err: Exception):
     _send_email(subject, text)
 
 def notify_summary(done_items: list[tuple[str, str, int, int]]):
-    # done_items: [(state_code, state_name, added, api_requests)]
     total_added = sum(i[2] for i in done_items)
     total_reqs = sum(i[3] for i in done_items)
     subject = f"[StudioFinder] Resumen OK – {len(done_items)} estados, {total_added} nuevos"
