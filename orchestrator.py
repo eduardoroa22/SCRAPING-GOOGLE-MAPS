@@ -6,7 +6,7 @@ import glob
 import traceback
 from typing import Optional, Sequence, Tuple, List
 from dotenv import load_dotenv
-
+from functions import ApiHardStop, notify_failure_halt
 from functions import (
     load_centers_csv,
     load_state_bbox,
@@ -125,13 +125,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             )
             completed.append((bbox.state_code, bbox.state_name, result.added_count, result.api_requests))
 
+        except ApiHardStop as e:
+            # Email con contexto preciso y corte del flujo
+            notify_failure_halt(
+                state_code=e.state_code,
+                state_name=e.state_name,
+                sheet_tab=e.tab_title,
+                csv_path=csv_path,
+                center_lat=e.center_lat,
+                center_lng=e.center_lng,
+                keyword=e.keyword,
+                status=e.status,
+                error_message=e.error_message,
+            )
+            print("[Runner] HALT por REQUEST_DENIED (Maps). Corrige la clave/billing y relanza.")
+            sys.exit(2)
+
         except Exception as e:
-            # Notificar y romper el flujo
-            try:
-                notify_failure(state_code=state_code, state_name=state_code, err=e)
-            finally:
-                print("[Runner] ERROR: se detiene la ejecución del lote.")
-                print("".join(traceback.format_exception(type(e), e, e.__traceback__)))
+            # Otros errores
+            notify_failure(state_code=state_code, state_name=state_code, err=e)
+            print("[Runner] ERROR: se detiene la ejecución del lote.")
+            print("".join(traceback.format_exception(type(e), e, e.__traceback__)))
             sys.exit(2)
 
     # Si llegamos aquí, todos los estados finalizaron bien

@@ -12,6 +12,7 @@ import socket, ssl
 from datetime import date
 from dataclasses import dataclass
 import re
+from notifier_ses import _send_email
 from scraping import find_emails_on_site
 
 try:
@@ -140,6 +141,19 @@ EXCLUDE_IF_NAME_CONTAINS = [
     "tattoo", "yoga", "pilates", "dance", "photo", "photography",
     "fitness", "crossfit", "martial", "hair", "salon", "nail",
 ]
+
+class ApiHardStop(Exception):
+    def __init__(self, message: str, *, state_code: str, state_name: str, tab_title: str,
+                 center_lat: float, center_lng: float, keyword: str, status: str, error_message: str = ""):
+        super().__init__(message)
+        self.state_code = state_code
+        self.state_name = state_name
+        self.tab_title = tab_title
+        self.center_lat = center_lat
+        self.center_lng = center_lng
+        self.keyword = keyword
+        self.status = status
+        self.error_message = error_message or ""
 
 def parse_address_components(address_components: List[dict]) -> tuple:
     """Extract city and zip code from address components."""
@@ -578,6 +592,20 @@ def collect_for_state(
                     print(f"[Collect] Nearby status no-OK: {status}")
                 total_requests += 1
                 time.sleep(pace_s)
+                err_msg = (data.get("error_message") or "")
+                if status == "REQUEST_DENIED" or "must use an api key" in err_msg.lower() or "enable billing" in err_msg.lower():
+                    raise ApiHardStop(
+                        f"NearbySearch {status}: {err_msg or 'no error_message'}",
+                        state_code=bbox.state_code,
+                        state_name=bbox.state_name,
+                        tab_title=tab_title_resolved,
+                        center_lat=center_lat,
+                        center_lng=center_lng,
+                        keyword=keyword,
+                        status=status,
+                        error_message=err_msg
+                    )
+
 
                 page_count = 1
                 while True:
@@ -601,6 +629,23 @@ def collect_for_state(
                             continue
 
                         det = fetch_details(api_key, pid)
+
+                        det_status = det.get("status")
+
+                        det_err = (det.get("error_message") or "")
+                        if det_status == "REQUEST_DENIED" or "must use an api key" in det_err.lower() or "enable billing" in det_err.lower():
+                            raise ApiHardStop(
+                                f"PlaceDetails {det_status}: {det_err or 'no error_message'}",
+                                state_code=bbox.state_code,
+                                state_name=bbox.state_name,
+                                tab_title=tab_title_resolved,
+                                center_lat=center_lat,
+                                center_lng=center_lng,
+                                keyword=keyword,
+                                status=det_status,
+                                error_message=det_err
+                            )
+                        
                         time.sleep(pace_s)
                         det_res = det.get("result", {}) if isinstance(det, dict) else {}
 
@@ -771,3 +816,21 @@ def get_service_account_email(path: str) -> str:
             return data.get("client_email", "")
     except Exception:
         return ""
+    
+def notify_failure_halt(state_code: str, state_name: str, sheet_tab: str, csv_path: str,
+                        center_lat: float, center_lng: float, keyword: str,
+                        status: str, error_message: str):
+    subject = f"[StudioFinder] HALT {state_code} – {status}"
+    text = (
+        f"Estado: {state_name} ({state_code})\n"
+        f"Pestaña en Sheet: {sheet_tab}\n"
+        f"CSV origen: {csv_path or '(grid generado)'}\n"
+        f"Centro actual: ({center_lat:.6f}, {center_lng:.6f})\n"
+        f"Keyword: {keyword}\n"
+        f"Status: {status}\n"
+        f"Error: {error_message}\n\n"
+        "Acción sugerida:\n"
+        "- Revisa la clave de Maps: habilita Billing / corrige restricciones / usa la key correcta.\n"
+        "- Luego reanuda desde este centro (usa centers CSV filtrado a partir de estas coords)."
+    )
+    _send_email(subject, text)
