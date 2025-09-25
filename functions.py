@@ -16,7 +16,7 @@ from notifier_ses import _send_email
 from scraping import find_emails_on_site
 
 try:
-    from dotenv import load_dotenv  # pip install python-dotenv (optional)
+    from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass
@@ -81,13 +81,9 @@ else:
 # ---------------------- Places API endpoints ----------------------
 
 # ---------------------- Defaults / Config -------------------------
-DEFAULT_KEYWORDS = [
-    "recording studio",
-    "music studio",
-    "mixing studio",
-    "mastering studio",
-    "rehearsal studio",
-    "music production"
+    DEFAULT_KEYWORDS = [
+    "audiophile/high-end",
+    "installer/integrator"
 ]
 
 # California bounding box (approx) — used if you don't provide a CSV with bboxes
