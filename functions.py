@@ -81,7 +81,7 @@ else:
 # ---------------------- Places API endpoints ----------------------
 
 # ---------------------- Defaults / Config -------------------------
-    DEFAULT_KEYWORDS = [
+DEFAULT_KEYWORDS = [
     "audiophile/high-end",
     "installer/integrator"
 ]
