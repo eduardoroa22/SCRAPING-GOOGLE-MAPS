@@ -115,5 +115,5 @@ state.json
 # Archivos de test
 test_output/
 test_results/
-
+test.py
 respaldo.js

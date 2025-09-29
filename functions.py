@@ -128,8 +128,9 @@ def _col_letter_from_index_one_based(idx: int) -> str:
 PLACE_ID_COL_INDEX = HEADERS.index("place_id") + 1
 PLACE_ID_COL_LETTER = _col_letter_from_index_one_based(PLACE_ID_COL_INDEX)
 
-NEARBY_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+NEARBY_URL = "https://google-map-places.p.rapidapi.com/maps/api/place/nearbysearch/json"
+DETAILS_URL = "https://google-map-places.p.rapidapi.com/maps/api/place/details/json"
+
 # Place Details fields (v2 JSON API)
 DETAIL_FIELDS = "name,formatted_address,website,url,geometry,formatted_phone_number,international_phone_number,address_components"
 INCLUDE_HINTS = ["record", "mix", "master", "audio", "music", "studio", "recording"]
@@ -201,27 +202,65 @@ def backoff_sleep(attempt: int, base: float = 1.7) -> None:
     wait = (base ** (attempt - 1)) + (0.25 * attempt)
     time.sleep(wait)
 
+def log_api_response(endpoint: str, status: str, attempt: int, **kwargs) -> None:
+    """Log API responses for debugging and monitoring."""
+    if DEBUG_API:
+        extras = []
+        for key, value in kwargs.items():
+            if key == "location" and isinstance(value, tuple):
+                extras.append(f"loc=({value[0]},{value[1]})")
+            elif key == "result_count":
+                extras.append(f"results={value}")
+            elif key == "keyword":
+                extras.append(f"kw='{value}'")
+            elif key == "place_id":
+                extras.append(f"place_id={value}")
+            else:
+                extras.append(f"{key}={value}")
+        
+        extra_str = " " + " ".join(extras) if extras else ""
+        print(f"[{endpoint.title()}] status={status} attempt={attempt}{extra_str}")
+        
+        # Si hay error, mostrar mensaje adicional
+        if status not in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
+            print(f"[{endpoint.title()}] ⚠️  Non-OK status: {status}")
+
 
 def nearby_search(api_key: str, lat: float, lng: float, keyword: str, radius_m: int,
                   pagetoken: Optional[str] = None, language: str = "en", region: str = "us") -> dict:
-    params = {"key": api_key, "language": language, "region": region}
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": "google-map-places.p.rapidapi.com"
+    }
+    
+    params = {"language": language, "region": region}
     if pagetoken:
         params["pagetoken"] = pagetoken
     else:
         params.update({"location": f"{lat},{lng}", "radius": radius_m, "keyword": keyword})
 
     for attempt in range(1, 7):
-        r = requests.get(NEARBY_URL, params=params, timeout=30)
+        r = requests.get(NEARBY_URL, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         status = data.get("status", "")
-        if DEBUG_API:
-            print(f"[Nearby] status={status} results={len(data.get('results', []))} next={bool(data.get('next_page_token'))} "
-                  f"loc=({lat},{lng}) kw='{keyword}' radius={radius_m} attempt={attempt}")
-            if status not in ("OK", "ZERO_RESULTS"):
-                em = data.get("error_message")
-                if em:
-                    print(f"[Nearby] error_message={em}")
+
+        log_api_response(
+            endpoint="nearbysearch",
+            location=(lat, lng),
+            keyword=keyword,
+            status=status,
+            result_count=len(data.get("results", [])),
+            attempt=attempt,
+        )
+
+        # if DEBUG_API:
+        #     print(f"[Nearby] status={status} results={len(data.get('results', []))} next={bool(data.get('next_page_token'))} "
+        #           f"loc=({lat},{lng}) kw='{keyword}' radius={radius_m} attempt={attempt}")
+        #     if status not in ("OK", "ZERO_RESULTS"):
+        #         em = data.get("error_message")
+        #         if em:
+        #             print(f"[Nearby] error_message={em}")
 
         if status in ("OK", "ZERO_RESULTS"):
             return data
@@ -234,18 +273,31 @@ def nearby_search(api_key: str, lat: float, lng: float, keyword: str, radius_m: 
 
 
 def fetch_details(api_key: str, place_id: str) -> dict:
-    params = {"place_id": place_id, "fields": DETAIL_FIELDS, "key": api_key}
+    headers = {
+        "x-rapidapi-key": api_key,
+        "x-rapidapi-host": "google-map-places.p.rapidapi.com"
+    }
+
+    params = {"place_id": place_id, "fields": DETAIL_FIELDS}
     for attempt in range(1, 7):
-        r = requests.get(DETAILS_URL, params=params, timeout=30)
+        r = requests.get(DETAILS_URL, headers=headers, params=params, timeout=30)
         r.raise_for_status()
         data = r.json()
         status = data.get("status", "")
-        if DEBUG_API:
-            print(f"[Details] status={status} place_id={place_id} attempt={attempt}")
-            if status not in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
-                em = data.get("error_message")
-                if em:
-                    print(f"[Details] error_message={em}")
+
+        # if DEBUG_API:
+        #     print(f"[Details] status={status} place_id={place_id} attempt={attempt}")
+        #     if status not in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
+        #         em = data.get("error_message")
+        #         if em:
+        #             print(f"[Details] error_message={em}")
+
+        log_api_response(
+            endpoint="details",
+            place_id=place_id,
+            status=status,
+            attempt=attempt,
+        )
 
         if status in ("OK", "ZERO_RESULTS", "NOT_FOUND"):
             return data

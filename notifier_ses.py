@@ -1,17 +1,14 @@
-# notifier_ses.py
 import os
 import traceback
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-# Asegura cargar .env si llaman este módulo directamente
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass
 
-# Región: prioriza AWS_SES_REGION_NAME, luego AWS_REGION/AWS_DEFAULT_REGION
 SES_REGION = (
     os.getenv("AWS_SES_REGION_NAME")
     or os.getenv("AWS_REGION")
@@ -19,13 +16,12 @@ SES_REGION = (
     or "us-east-1"
 )
 
-SES_SENDER = os.getenv("SES_SENDER")  # e.g. no-reply@tudominio.com (verificado en SES)
+SES_SENDER = os.getenv("SES_SENDER") 
 SES_RECIPIENTS = [e.strip() for e in os.getenv("SES_RECIPIENTS", "").split(",") if e.strip()]
 
-# Credenciales explícitas (opcionales). Si no están, boto3 usará la credential chain (IAM Role, ~/.aws, etc.)
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")  # opcional (STS)
+AWS_SESSION_TOKEN = os.getenv("AWS_SESSION_TOKEN")
 
 def _build_ses_client():
     kwargs = {"region_name": SES_REGION}

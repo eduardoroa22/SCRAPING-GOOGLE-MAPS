@@ -131,9 +131,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
   <script>
-    // --- Presets de BBox por estado (TODOS LOS ESTADOS DE USA) ---
     const STATE_BBOXES = {
-      // Estados del Oeste
       "CA": {name:"California", lat_min:32.50, lat_max:42.00, lng_min:-124.50, lng_max:-114.10},
       "OR": {name:"Oregon", lat_min:41.99, lat_max:46.30, lng_min:-124.70, lng_max:-116.46},
       "WA": {name:"Washington", lat_min:45.54, lat_max:49.00, lng_min:-124.85, lng_max:-116.91},
@@ -148,7 +146,6 @@
       "AK": {name:"Alaska", lat_min:54.00, lat_max:71.50, lng_min:-179.00, lng_max:-129.00},
       "HI": {name:"Hawaii", lat_min:18.91, lat_max:22.23, lng_min:-160.25, lng_max:-154.80},
 
-      // Estados del Centro/Grandes Llanuras
       "ND": {name:"North Dakota", lat_min:45.93, lat_max:49.00, lng_min:-104.05, lng_max:-96.55},
       "SD": {name:"South Dakota", lat_min:42.48, lat_max:45.95, lng_min:-104.06, lng_max:-96.43},
       "NE": {name:"Nebraska", lat_min:39.99, lat_max:43.01, lng_min:-104.06, lng_max:-95.31},
@@ -156,7 +153,6 @@
       "OK": {name:"Oklahoma", lat_min:33.62, lat_max:37.00, lng_min:-103.00, lng_max:-94.43},
       "TX": {name:"Texas", lat_min:25.84, lat_max:36.50, lng_min:-106.65, lng_max:-93.51},
 
-      // Estados del Centro-Norte (Great Lakes)
       "MN": {name:"Minnesota", lat_min:43.50, lat_max:49.38, lng_min:-97.24, lng_max:-89.49},
       "IA": {name:"Iowa", lat_min:40.37, lat_max:43.50, lng_min:-96.64, lng_max:-90.14},
       "MO": {name:"Missouri", lat_min:35.99, lat_max:40.61, lng_min:-95.77, lng_max:-89.10},
@@ -168,7 +164,6 @@
       "IN": {name:"Indiana", lat_min:37.77, lat_max:41.76, lng_min:-88.10, lng_max:-84.78},
       "OH": {name:"Ohio", lat_min:38.40, lat_max:42.33, lng_min:-84.82, lng_max:-80.52},
 
-      // Estados del Sur
       "MS": {name:"Mississippi", lat_min:30.17, lat_max:35.01, lng_min:-91.66, lng_max:-88.10},
       "AL": {name:"Alabama", lat_min:30.22, lat_max:35.01, lng_min:-88.47, lng_max:-84.89},
       "TN": {name:"Tennessee", lat_min:34.98, lat_max:36.68, lng_min:-90.31, lng_max:-81.65},
@@ -180,7 +175,6 @@
       "VA": {name:"Virginia", lat_min:36.54, lat_max:39.46, lng_min:-83.68, lng_max:-75.24},
       "WV": {name:"West Virginia", lat_min:37.20, lat_max:40.64, lng_min:-82.64, lng_max:-77.72},
 
-      // Estados del Noreste
       "PA": {name:"Pennsylvania", lat_min:39.72, lat_max:42.27, lng_min:-80.52, lng_max:-74.69},
       "NY": {name:"New York", lat_min:40.49, lat_max:45.01, lng_min:-79.76, lng_max:-71.85},
       "VT": {name:"Vermont", lat_min:42.73, lat_max:45.01, lng_min:-73.44, lng_max:-71.46},
@@ -193,9 +187,7 @@
       "DE": {name:"Delaware", lat_min:38.45, lat_max:39.84, lng_min:-75.79, lng_max:-75.05},
       "MD": {name:"Maryland", lat_min:37.91, lat_max:39.72, lng_min:-79.49, lng_max:-75.05},
 
-      // Distrito de Columbia
       "DC": {name:"Washington D.C.", lat_min:38.79, lat_max:38.99, lng_min:-77.12, lng_max:-76.91},
-      //puerto rico
       "PR": {name:"Puerto Rico", lat_min:17.91, lat_max:18.52, lng_min:-67.94, lng_max:-65.22},
 
     };
@@ -286,17 +278,17 @@
     };
 
 
-    const QUICK = ["CA","TX","FL","NY","PA","IL","OH","GA","NC","MI"]; // chips rápidos (estados más populares)
+    const QUICK = ["CA","TX","FL","NY","PA","IL","OH","GA","NC","MI"];
 
     // Mapa base
-    const map = L.map('map').setView([39.8, -98.6], 4); // Centrado en USA
+    const map = L.map('map').setView([39.8, -98.6], 4);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
     }).addTo(map);
 
     let layerBBox, layerPts, layerCircles, maskLayer, tempLine;
-    let maskPolygon = null; // GeoJSON Polygon
+    let maskPolygon = null; 
     let drawing = false;
     let tempLatLngs = [];
 
@@ -388,7 +380,6 @@
       download('grid_points.csv', csv);
     }
 
-    // --- Dibujo de máscara ---
     function startMask(){
       drawing = true; tempLatLngs = [];
       if(tempLine){ map.removeLayer(tempLine); tempLine = null; }
@@ -429,7 +420,6 @@
         if(!tempLine){ tempLine = L.polyline(tempLatLngs, {color:'#ffb74d', weight:1}).addTo(map); }
         else { tempLine.setLatLngs(tempLatLngs); }
       }
-      // Captura de coordenadas para copiar
       document.getElementById('clicked_lat').value = e.latlng.lat.toFixed(6);
       document.getElementById('clicked_lng').value = e.latlng.lng.toFixed(6);
     });
@@ -442,7 +432,6 @@
       navigator.clipboard.writeText(txt).catch(()=>{});
     });
 
-    // Cargar GeoJSON (Polygon/MultiPolygon)
     document.getElementById('fileGeo').addEventListener('change', (ev) => {
       const file = ev.target.files && ev.target.files[0];
       if(!file) return;
@@ -499,21 +488,18 @@
         draw();
     }
 
-    // --- UI Estados ---
     function applyAlaskaCity(city){
         document.getElementById('lat_min').value = city.lat_min.toFixed(6);
         document.getElementById('lat_max').value = city.lat_max.toFixed(6);
         document.getElementById('lng_min').value = city.lng_min.toFixed(6);
         document.getElementById('lng_max').value = city.lng_max.toFixed(6);
         
-        // Ajustar espaciado para áreas pequeñas
-        document.getElementById('spacing_km').value = "5"; // Grid más denso para ciudades
-        document.getElementById('radius_m').value = "8000"; // Radio menor para búsquedas urbanas
+        document.getElementById('spacing_km').value = "5"; 
+        document.getElementById('radius_m').value = "8000"; 
         
         draw();
     }
 
-    // chips rápidos (estados más populares)
     const quick = document.getElementById('quickStates');
     QUICK.forEach(code => {
         const b = STATE_BBOXES[code];
@@ -526,7 +512,6 @@
         quick.appendChild(el);
     });
 
-    // select completo con TODOS los estados - existing code
     const sel = document.getElementById('stateSelect');
     Object.entries(STATE_BBOXES).sort((a,b)=> a[1].name.localeCompare(b[1].name)).forEach(([code, b]) => {
         const opt = document.createElement('option');
@@ -539,7 +524,6 @@
         applyBBox(b);
     });
 
-    // ✅ NUEVO: Selector de ciudades de Alaska
     const alaskaSel = document.getElementById('alaskaCitySelect');
     Object.entries(ALASKA_CITIES).sort((a,b)=> a[1].name.localeCompare(b[1].name)).forEach(([code, city]) => {
         const opt = document.createElement('option');
@@ -556,7 +540,6 @@
         applyAlaskaCity(city);
     });
 
-    // Dibuja al cargar (por defecto California)
     draw();
 </script>
 </body>

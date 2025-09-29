@@ -52,7 +52,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print("[Config] Faltan GOOGLEAPI_KEY / GOOGLESHEETS / GOOGLESERVICE")
         sys.exit(1)
 
-    # Opciones operativas (heredadas de tu .env)
+
     grid_spacing_km = float(os.getenv("GRID_SPACING_KM", GRID_SPACING_KM_DEFAULT))
     radius_m = int(os.getenv("RADIUS_M", RADIUS_M_DEFAULT))
     pace_s = float(os.getenv("PACE_SECONDS", PACE_S_DEFAULT))
@@ -65,7 +65,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     skip_overlap_centers = os.getenv("SKIP_OVERLAP_CENTERS", "0") == "1" or SKIP_OVERLAP_CENTERS_DEFAULT
     overlap_factor = float(os.getenv("OVERLAP_FACTOR", OVERLAP_FACTOR_DEFAULT))
 
-    # Descubrir CSVs de estados (centros por estado)
+   
     paths = sorted(glob.glob(os.path.join(states_dir, "*.csv")))
     if not paths:
         print(f"[Runner] No hay CSVs en {states_dir}")
@@ -73,11 +73,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     print(f"[Runner] Encontrados {len(paths)} CSVs en {states_dir}")
 
-    completed: list[tuple[str, str, int, int]] = []  # (code, name, added, reqs)
+    completed: list[tuple[str, str, int, int]] = []
 
     for csv_path in paths:
         filename = os.path.basename(csv_path)
-        state_code = os.path.splitext(filename)[0].upper()  # p.ej. CA.csv -> CA
+        state_code = os.path.splitext(filename)[0].upper()
         print(f"[Runner] CSV: {csv_path}")
 
         try:
@@ -85,7 +85,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             if not centers:
                 raise RuntimeError(f"CSV sin centros válidos: {csv_path}")
 
-            # BBox: preferir archivo maestro; si no, inferir del CSV
+           
             if state_bbox_file:
                 try:
                     bbox = load_state_bbox(state_code, state_bbox_file)
@@ -94,15 +94,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             else:
                 bbox = _bbox_from_centers(state_code, centers)
 
-            # Ejecutar recolección (forzamos centers_override = CSV de ese estado)
+            
             result = collect_for_state(
                 api_key=api_key,
                 sheet_id=sheet_id,
                 service_account_json=service_json,
                 bbox=bbox,
-                grid_spacing_km=grid_spacing_km,   # sin efecto si hay centers_override
+                grid_spacing_km=grid_spacing_km,   
                 radius_m=radius_m,
-                csv_output=None,                   # si quieres, pon un CSV por estado
+                csv_output=None,                   
                 pace_s=pace_s,
                 tab_title=tab_title,
                 tab_title_template=tab_template,
@@ -114,7 +114,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 overlap_factor=overlap_factor,
             )
 
-            # result es RunResult (agregado en functions.py)
             notify_success(
                 state_code=bbox.state_code,
                 state_name=bbox.state_name,
@@ -126,7 +125,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             completed.append((bbox.state_code, bbox.state_name, result.added_count, result.api_requests))
 
         except ApiHardStop as e:
-            # Email con contexto preciso y corte del flujo
             notify_failure_halt(
                 state_code=e.state_code,
                 state_name=e.state_name,
@@ -142,13 +140,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(2)
 
         except Exception as e:
-            # Otros errores
             notify_failure(state_code=state_code, state_name=state_code, err=e)
             print("[Runner] ERROR: se detiene la ejecución del lote.")
             print("".join(traceback.format_exception(type(e), e, e.__traceback__)))
             sys.exit(2)
 
-    # Si llegamos aquí, todos los estados finalizaron bien
     if completed:
         notify_summary(completed)
 

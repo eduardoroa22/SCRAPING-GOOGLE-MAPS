@@ -33,7 +33,6 @@ def _extract_emails_from_html(html: str) -> List[str]:
     return sorted(emails)
 
 def find_emails_on_site(website: str) -> List[str]:
-    """Rastrea pocas páginas del mismo sitio para encontrar emails públicos."""
     if not website:
         return []
 
@@ -47,7 +46,6 @@ def find_emails_on_site(website: str) -> List[str]:
 
     base = f"{parsed.scheme}://{parsed.netloc}"
     candidates = [website]
-    # Páginas típicas
     for path in ("/contact", "/contact-us", "/contactus", "/about", "/about-us", "/studio", "/info"):
         candidates.append(urljoin(base, path))
 
@@ -62,7 +60,6 @@ def find_emails_on_site(website: str) -> List[str]:
             break
         if not url or url in seen:
             continue
-        # Mantenerse en el mismo host
         if urlparse(url).netloc != parsed.netloc:
             continue
 
